@@ -1,3 +1,6 @@
+"./Core/Src/Znp_app.o"
+"./Core/Src/Znp_parser.o"
+"./Core/Src/app_state.o"
 "./Core/Src/http_page.o"
 "./Core/Src/http_server.o"
 "./Core/Src/itm_ports.o"

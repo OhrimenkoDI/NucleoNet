@@ -8,6 +8,9 @@
 
 #include "itm_ports.h"   // твоя функция ITM_Print_Port()
 
+// здесь глобальные переменные
+#include "app_state.h"
+
 // === Глобальные переменные состояния (объявлены в http_server.h как extern).
 // Настоящие определения должны быть где-то в одном .c (например, main.c):
 // float  http_t1 = 21.5f, http_t2 = 22.0f, http_t3 = 23.3f;

@@ -57,6 +57,20 @@ static ip_addr_t g_dst_ip;
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+#include "usb_host.h"
+#include "usbh_cdc.h"
+
+#include <string.h>
+#include <stdio.h>
+
+extern ApplicationTypeDef Appli_state;  // только extern, без инициализации
+extern uint8_t  dummy_rx[256];
+extern volatile uint8_t  cdc_rx_ready;
+extern volatile uint32_t cdc_rx_len;
+extern uint8_t  cdc_tx_buf[256];
+extern USBH_HandleTypeDef hUsbHostFS;
+extern uint16_t plugNwk;
+
 
 /* USER CODE END PV */
 
@@ -84,15 +98,6 @@ int _write(int file, char *ptr, int len)
 
 // для http_server ----------------------------------
 #include "http_server.h"
-
-// Реальные глобальные переменные, о которых ты говорил
-float  http_t1 = 21.5f;
-float  http_t2 = 22.0f;
-float  http_t3 = 23.3f;
-
-uint8_t http_on1 = 0;
-uint8_t http_on2 = 0;
-uint8_t http_on3 = 0;
 
 // (опционально) своя реализация хука:
 void HTTP_OnOutputChanged(uint8_t index, uint8_t new_state)
@@ -133,6 +138,7 @@ int main(void)
 
   /* USER CODE BEGIN Init */
 
+
   /* USER CODE END Init */
 
   /* Configure the system clock */
@@ -147,6 +153,11 @@ int main(void)
   MX_LWIP_Init();
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
+
+  HAL_GPIO_WritePin(LEDB_GPIO_Port,LEDB_Pin,1);
+  HAL_GPIO_WritePin(LEDR_GPIO_Port,LEDR_Pin,1);
+  HAL_GPIO_WritePin(USBPow_GPIO_Port,USBPow_Pin,1);
+  HAL_Delay(100);
 
   extern struct netif gnetif;
   uint32_t t0 = HAL_GetTick();
@@ -180,6 +191,10 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   uint32_t last = 0;
+  uint32_t last_led = 0;
+  uint8_t  started = 0;
+  uint32_t last_ping = 0;
+
   while (1)
   {
 	  MX_LWIP_Process();   // генерит ethernetif_input() + sys_check_timeouts()
@@ -201,9 +216,89 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
+    // мигаем без блокировок
+    uint32_t now = HAL_GetTick();
+    if (now - last_led > 200) {
+        last_led = now;
+        HAL_GPIO_TogglePin(LEDB_GPIO_Port, LEDB_Pin);
+        HAL_GPIO_TogglePin(LEDR_GPIO_Port, LEDR_Pin);
+        ITM_Print_Port(0, "ZNP RX frame\r\n");      // старый лог
+        ITM_Print_Port(1, "Parser OK\r\n");        // отдельное окно под парсер
+        ITM_Print_Port(1, "On/Off cmd sent\r\n");
 
-  } // while (1)
-  /* USER CODE END 3 */
+    }
+
+    if (Appli_state == APPLICATION_READY)
+    {
+    	if (!started) {
+    	    HAL_Delay(50);
+
+    	    if (Send_EF_raw() == 0) {
+    	        printf("EF sent\r\n");
+    	    }
+
+    	    uint32_t t0 = HAL_GetTick();
+    	    while ((HAL_GetTick() - t0) < 500) {
+    	        MX_USB_HOST_Process();
+    	        if (cdc_rx_ready) {
+    	            uint32_t n = cdc_rx_len;
+    	            cdc_rx_ready = 0;
+
+    	            printf("RX RAW:");
+    	            for (uint32_t i = 0; i < n; i++) {
+    	                printf(" %02X", dummy_rx[i]);
+    	            }
+    	            printf("\r\n");
+
+    	            ZNP_ParseBytes(dummy_rx, n);
+    	            USBH_CDC_Receive(&hUsbHostFS, dummy_rx, sizeof(dummy_rx));
+    	        }
+    	    }
+
+    	    ZNP_Send_SYS_PING();                 // контроль линка
+    	    ZB_START_REQUEST();
+    	    ZNP_AF_REGISTER();                   // <--- ВАЖНО: регаем APP_EP
+    	    ZNP_Send_ZDO_NWK_ADDR_REQ_Plug();    // ищем NWK для розетки
+
+    	    started = 1;
+    	}
+
+
+    	if (cdc_rx_ready) {
+    	    uint32_t n = cdc_rx_len;
+    	    cdc_rx_ready = 0;
+
+    	    printf("RX RAW:");
+    	    for (uint32_t i = 0; i < n; i++) {
+    	        printf(" %02X", dummy_rx[i]);
+    	    }
+    	    printf("\r\n");
+
+    	    ZNP_ParseBytes(dummy_rx, n);
+    	    USBH_CDC_Receive(&hUsbHostFS, dummy_rx, sizeof(dummy_rx));
+    	}
+
+
+        static uint32_t last_toggle = 0;
+        static uint8_t state = 0;
+
+        if (plugNwk && (now - last_toggle > 3000)) { // раз в 3 секунды
+            last_toggle = now;
+            state = !state;
+            send_onoff(state);
+        }
+
+        if (now - last_ping > 5000) {
+            last_ping = now;
+            ZNP_Send_SYS_PING();
+        }
+
+    }else
+    if (Appli_state == APPLICATION_DISCONNECT){
+    	started = 0;
+    }
+    /* USER CODE END 3 */
+  }
 }
 
 /**
@@ -266,6 +361,7 @@ void SystemClock_Config(void)
   */
 static void MX_GPIO_Init(void)
 {
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
   /* USER CODE END MX_GPIO_Init_1 */
@@ -276,6 +372,26 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOG_CLK_ENABLE();
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, LEDR_Pin|LEDB_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(USBPow_GPIO_Port, USBPow_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pins : LEDR_Pin LEDB_Pin */
+  GPIO_InitStruct.Pin = LEDR_Pin|LEDB_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : USBPow_Pin */
+  GPIO_InitStruct.Pin = USBPow_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(USBPow_GPIO_Port, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
