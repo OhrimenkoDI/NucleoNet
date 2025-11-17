@@ -82,6 +82,34 @@ int _write(int file, char *ptr, int len)
     return len;
 }
 
+// для http_server ----------------------------------
+#include "http_server.h"
+
+// Реальные глобальные переменные, о которых ты говорил
+float  http_t1 = 21.5f;
+float  http_t2 = 22.0f;
+float  http_t3 = 23.3f;
+
+uint8_t http_on1 = 0;
+uint8_t http_on2 = 0;
+uint8_t http_on3 = 0;
+
+// (опционально) своя реализация хука:
+void HTTP_OnOutputChanged(uint8_t index, uint8_t new_state)
+{
+    char buf[64];
+    snprintf(buf, sizeof(buf),
+             "EVENT: socket %u -> %u\r\n",
+             (unsigned)index, (unsigned)new_state);
+    ITM_Print_Port(2, buf);
+
+    // здесь же можешь включать/выключать реальные выходы GPIO
+}
+// для http_server ----------------------------------
+
+
+
+
 /* USER CODE END 0 */
 
 /**
@@ -140,6 +168,9 @@ int main(void)
   // Подключаемся к MQTT брокеру
   MQTT_Start();
 
+  // Сервер HTTP
+  HTTP_Server_Init();   // <= вот это добавить
+
   ITM_Print_Port(0, "Main Start\r\n");
 
 
@@ -167,7 +198,7 @@ int main(void)
 	      last = HAL_GetTick();
 	  }
     /* USER CODE END WHILE */
-
+    MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
 

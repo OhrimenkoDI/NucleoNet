@@ -1,3 +1,5 @@
+"./Core/Src/http_page.o"
+"./Core/Src/http_server.o"
 "./Core/Src/itm_ports.o"
 "./Core/Src/main.o"
 "./Core/Src/mqtt_broker_connector.o"
